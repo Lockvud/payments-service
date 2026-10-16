@@ -1,0 +1,118 @@
+name: payments-service
+
+x-app-env: &app-env
+  DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-payments}:${POSTGRES_PASSWORD:-payments}@postgres:5432/${POSTGRES_DB:-payments}
+  RABBITMQ_URL: amqp://${RABBITMQ_USER:-guest}:${RABBITMQ_PASSWORD:-guest}@rabbitmq:5672/
+  API_KEY: ${API_KEY:?API_KEY must be set in .env}
+
+  OUTBOX_POLL_INTERVAL: "${OUTBOX_POLL_INTERVAL:-1.0}"
+  OUTBOX_BATCH_SIZE: "${OUTBOX_BATCH_SIZE:-100}"
+
+  # Retry стадии генерируются автоматически из этих параметров.
+  # Значения подставляются из .env, дефолты — на случай отсутствия переменных.
+  PROCESS_MAX_ATTEMPTS: "${PROCESS_MAX_ATTEMPTS:-3}"
+  RETRY_BASE_DELAY_MS: "${RETRY_BASE_DELAY_MS:-5000}"
+  RETRY_MULTIPLIER: "${RETRY_MULTIPLIER:-2.0}"
+  RETRY_MAX_DELAY_MS: "${RETRY_MAX_DELAY_MS:-300000}"
+
+  GATEWAY_MIN_LATENCY: "${GATEWAY_MIN_LATENCY:-2.0}"
+  GATEWAY_MAX_LATENCY: "${GATEWAY_MAX_LATENCY:-5.0}"
+  GATEWAY_SUCCESS_RATE: "${GATEWAY_SUCCESS_RATE:-0.9}"
+
+  WEBHOOK_MAX_ATTEMPTS: "${WEBHOOK_MAX_ATTEMPTS:-3}"
+  WEBHOOK_BASE_DELAY: "${WEBHOOK_BASE_DELAY:-0.5}"
+  WEBHOOK_TIMEOUT: "${WEBHOOK_TIMEOUT:-10.0}"
+  WEBHOOK_ALLOW_PRIVATE_HOSTS: "${WEBHOOK_ALLOW_PRIVATE_HOSTS:-true}"
+
+x-app-build: &app-build
+  build:
+    context: .
+    dockerfile: Dockerfile
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-payments}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-payments}
+      POSTGRES_DB: ${POSTGRES_DB:-payments}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-payments} -d ${POSTGRES_DB:-payments}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-guest}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-guest}
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    healthcheck:
+      # check_port_connectivity, а не ping, ping подтверждает, что Erlang VM
+      # запущена, но не проверяет, слушает ли AMQP-порт 5672
+      # При первом старте
+      # между этими состояниями есть окно в несколько секунд, если
+      # outbox-publisher/consumer стартанут в это окно, получат ConnectionRefused
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "check_port_connectivity"]
+      interval: 5s
+      timeout: 10s
+      retries: 20
+      start_period: 20s
+
+  migrate:
+    <<: *app-build
+    command: ["alembic", "upgrade", "head"]
+    environment: *app-env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    <<: *app-build
+    command: ["uvicorn", "payments.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    environment: *app-env
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  outbox-publisher:
+    <<: *app-build
+    command: ["python", "-m", "payments.workers.outbox_publisher"]
+    environment: *app-env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  consumer:
+    <<: *app-build
+    command: ["faststream", "run", "payments.messaging.consumer:app"]
+    environment: *app-env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+volumes:
+  pg_data:
