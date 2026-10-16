@@ -1,0 +1,42 @@
+{
+  "name": "payments-service",
+  "build": {
+    "dockerfile": "Dockerfile",
+    "context": ".."
+  },
+  "workspaceFolder": "/workspaces/payment-service",
+  "workspaceMount": "source=${localWorkspaceFolder},target=/workspaces/payment-service,type=bind,consistency=cached",
+  "remoteUser": "vscode",
+  "runArgs": [
+    "--network=payments-service_default"
+  ],
+  "remoteEnv": {
+    "DATABASE_URL": "postgresql+asyncpg://payments:payments@postgres:5432/payments",
+    "RABBITMQ_URL": "amqp://guest:guest@rabbitmq:5672/",
+    "API_KEY": "example"
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        "ms-python.vscode-pylance",
+        "charliermarsh.ruff",
+        "tamasfe.even-better-toml",
+        "redhat.vscode-yaml",
+        "ms-azuretools.vscode-docker"
+      ],
+      "settings": {
+        "python.defaultInterpreterPath": "${workspaceFolder}/.venv/bin/python",
+        "[python]": {
+          "editor.defaultFormatter": "charliermarsh.ruff",
+          "editor.formatOnSave": true
+        }
+      }
+    }
+  },
+  "postCreateCommand": "uv sync --all-groups",
+  "forwardPorts": [
+    8000
+  ],
+  "shutdownAction": "none"
+}
