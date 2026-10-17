@@ -1,0 +1,72 @@
+[project]
+name = "payments-service"
+version = "0.1.0"
+description = "Async payments processing microservice (FastAPI + SQLAlchemy 2.0 + RabbitMQ)"
+readme = "README.md"
+requires-python = ">=3.14,<3.15"
+dependencies = [
+    "fastapi>=0.120.0",
+    "uvicorn[standard]>=0.32.0",
+    "pydantic>=2.9.0",
+    "pydantic-settings>=2.6.0",
+    "sqlalchemy[asyncio]>=2.0.54,<2.1",
+    "asyncpg>=0.31.0",
+    "alembic>=1.14.0",
+    "httpx>=0.28.0",
+    "faststream[rabbit,cli]>=0.6.7,<0.7",
+]
+
+[build-system]
+requires = ["uv_build>=0.13,<0.14"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-root = "src"
+module-name = "payments"
+
+[dependency-groups]
+dev = [
+    "ruff>=0.8.0",
+    "mypy>=1.13.0",
+]
+test = [
+    "pytest>=8.4.0",
+    "pytest-asyncio>=1.4.0",
+    "testcontainers[postgres,rabbitmq]>=4.9.0",
+]
+
+[tool.uv]
+package = true
+
+[tool.ruff]
+line-length = 120
+target-version = "py314"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF", "ASYNC", "BLE"]
+ignore = [
+    # В docstrings кириллические буквы с, а, у, в
+    # визуально совпадают с латинскими.
+    "RUF001",
+    "RUF002",
+    "RUF003",
+    "ASYNC109",
+]
+
+[tool.mypy]
+python_version = "3.14"
+strict = true
+plugins = ["pydantic.mypy"]
+mypy_path = "src"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "session"
+asyncio_default_test_loop_scope = "session"
+testpaths = ["tests"]
+addopts = "-q"
+markers = [
+    "unit: fast tests, no Docker required",
+    "integration: requires testcontainers (Docker)",
+]
